@@ -22,17 +22,13 @@ import numpy as np
 import pandas as pd
 
 from estimation import estimate_single_factor
-from portfolios import equal_weight, min_risk_closed_form, value_weight
+from portfolios import min_risk_closed_form
 
 # The closed form is ~3900x faster than the cvxpy model on n=500 (0.2ms vs 776ms),
 # which turns a 372-month backtest from ~5 minutes into a fraction of a second.
 # `min_risk` from portfolios.py solves the same problem and is kept for
 # cross-validation.
-CONSTRUCTORS = {
-    "min_risk": min_risk_closed_form,
-    "ew": equal_weight,
-    "vw": value_weight,
-}
+CONSTRUCTORS = {"min_risk": min_risk_closed_form}
 
 
 def select_universe(rets, caps, window, t, n):
@@ -99,6 +95,8 @@ def rolling_backtest(
         r_next = rets.loc[t_next, universe].fillna(float(rf.loc[t_next])).values
 
         for name, construct in constructors.items():
+            # caps are passed through for constructors that need them; those that
+            # do not simply absorb the keyword.
             result = construct(cov, caps=caps.loc[t, universe].values)
             x = result["x"]
             r_portfolio = float(x @ r_next)

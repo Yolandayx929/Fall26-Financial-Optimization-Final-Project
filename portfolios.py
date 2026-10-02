@@ -4,6 +4,9 @@
 `min_risk_closed_form` implements the analytic solution, equation (3) of the
 same exercise, and exists to verify the optimizer numerically.
 
+The equally weighted and value weighted benchmarks are built elsewhere; this module
+covers the minimum risk portfolio only.
+
 All portfolios here are fully invested and long only.
 """
 
@@ -133,22 +136,3 @@ def min_risk_closed_form(cov: FactorCov, tol: float = 1e-14, maxiter: int = 300,
     return dict(
         x=x, sigma2=cov.quad(x), n_held=int((x > 0).sum()), beta_LO=threshold
     )
-
-
-def equal_weight(cov: FactorCov, **_) -> dict:
-    """Equally weighted portfolio over the current universe."""
-    x = np.ones(cov.n) / cov.n
-    return dict(x=x, sigma2=cov.quad(x), n_held=cov.n)
-
-
-def value_weight(cov: FactorCov, caps=None, **_) -> dict:
-    """Capitalisation weighted portfolio over the current universe.
-
-    `caps` are the market caps as of the rebalance date, aligned with
-    `cov.permno`.
-    """
-    if caps is None:
-        raise ValueError("value_weight needs market caps")
-    w = np.asarray(caps, dtype=float)
-    x = w / w.sum()
-    return dict(x=x, sigma2=cov.quad(x), n_held=cov.n)
