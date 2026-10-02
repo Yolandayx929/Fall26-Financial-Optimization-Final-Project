@@ -103,10 +103,17 @@ MktRf.csv 的 index 正好也是 `yyyymm`，对得上。
 
 验证：60 月窗口的 `sigma_M = 0.0439`，落在 0.04–0.05 内。notebook 里有断言。
 
-### 4.4 这份 extract 没有 share type 列
+### 4.4 share type 筛选 —— 我之前的判断是错的，已更正
 
-只有 `primaryexch`，做不了标准 CIZ 筛选。现在是 `primaryexch ∈ {N, A, Q}`，
-丢掉 1.80% 的行。**这是个已知限制，slides 上要注明。**
+我原先写"这份 extract 没有 share type 列，做不了标准 CIZ 筛选，是个已知限制"。
+**不对。** 看 `project_data.py` 才知道，CIZ 筛选是在**下载时的 SQL WHERE 子句里**做的
+（`sharetype='NS'`、`securitytype='EQTY'`、`securitysubtype='COM'`、`usincflg='Y'`、
+`issuertype IN ('ACOR','CORP')`），所以 parquet 里**已经只有美国普通股**，
+ETF / 基金 / ADR 都不在文件里。列看不到，是因为它们只用作筛选条件、没有 SELECT 出来。
+
+**结论：slides 上不需要写这条限制。** notebook 里的 `primaryexch ∈ {N, A, Q}`
+（丢掉 1.80% 的行）是在此之上额外的交易所筛选，与队友 `comparison.ipynb` 的口径一致。
+
 （`mthret` 是小数；`mcap = mthcap / 1000`，VW 用哪个都一样，scale-invariant。）
 
 ---
@@ -123,7 +130,13 @@ annualised turnover 116.62%
 ```
 
 闭式解说的 **low-beta bet，实证完全对上**：平均只持 45/500 只，
-`beta_LO` 均值 0.578（范围 0.437–0.707），ex-ante beta 均值 0.427。
+`beta_LO` 均值 0.578（范围 0.437–0.707），**ex-ante** beta 均值 **0.427**。
+
+> **注意别和队友表里的 0.34 搞混** —— 那是 **realized** beta
+> （组合 excess return 对 Mkt-RF 回归）。两个是不同的量，都对。
+> 而且差值本身有信息：模型**高估**了市场暴露（0.43 预测 vs 0.34 实际），
+> 却**低估**了总波动（第 6 节的 0.5741）。既然实际的市场暴露比模型以为的还小，
+> 那多出来的实际波动就只能来自非市场来源 —— 这是对第 6 节结论的**独立佐证**。
 
 ### 子区间
 

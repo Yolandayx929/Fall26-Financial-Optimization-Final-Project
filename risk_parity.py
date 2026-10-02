@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from backtesting_analysis import risk_contributions
+from evaluation import risk_contributions
 from estimation import FactorCov
 
 
