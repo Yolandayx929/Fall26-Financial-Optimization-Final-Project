@@ -26,7 +26,7 @@ from min_risk import min_risk_closed_form
 
 # The closed form is ~3900x faster than the cvxpy model on n=500 (0.2ms vs 776ms),
 # which turns a 372-month backtest from ~5 minutes into a fraction of a second.
-# `min_risk` from portfolios.py solves the same problem and is kept for
+# `min_risk` from min_risk.py solves the same problem and is kept for
 # cross-validation.
 CONSTRUCTORS = {"min_risk": min_risk_closed_form}
 

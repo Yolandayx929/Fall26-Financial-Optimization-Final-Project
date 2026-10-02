@@ -2,7 +2,7 @@
 
 Risk parity asks every name to carry the same total risk contribution,
 RC_i = x_i (Vx)_i / sigma_p = sigma_p / n, with RC_i as defined by the Euler
-decomposition in `backtesting_analysis.risk_contributions`. For long-only
+decomposition in `evaluation.risk_contributions`. For long-only
 portfolios this is the solution, rescaled to sum to one, of the strictly
 convex problem
 (Spinu 2013; Maillard, Roncalli and Teiletche 2010)
@@ -190,7 +190,7 @@ def risk_parity(cov: FactorCov, **_) -> dict:
 
     Returns the keys the backtest records (x, sigma2, n_held). Risk parity
     holds every name, so n_held is always n. Month-by-month risk-contribution
-    diagnostics are computed afterwards by `backtesting_analysis.risk_concentration`.
+    diagnostics are computed afterwards by `evaluation.risk_concentration`.
     """
     x = risk_parity_closed_form(cov)
     return dict(x=x, sigma2=cov.quad(x), n_held=int((x > 0).sum()))
