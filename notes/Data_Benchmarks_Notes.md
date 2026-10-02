@@ -3,7 +3,6 @@
 > 本人负责 topic 3 的 **数据**（下载、清洗、data-quality check、universe summary）、
 > 两个 benchmark（**EW / VW**），以及全组的 **最终对比**（汇总表 + 累积收益图）。
 > 不改动队友的 `estimation.py` / `min_risk.py` / `risk_parity.py` / `backtest.py` / `backtesting_analysis.py`，
-> 只新增文件。统计、金融术语用 English，其余用中文。
 
 ---
 
@@ -19,7 +18,7 @@
 
 ## 2. 数据是怎么来的
 
-**一句话：** 从 WRDS 拉 CRSP 月度数据，只留美国普通股，存成 `data/crsp_msf_v2.parquet`，大家都读这一个文件。
+从 WRDS 拉 CRSP 月度数据，只留美国普通股，存成 `data/crsp_msf_v2.parquet`，大家都读这一个文件。
 
 - **来源：** `crsp.msf_v2`（CRSP 新版 CIZ 格式，年度更新），1990-01 到 2025-12。
 - **只要美国普通股：** 在下载的 SQL 里就筛好了（`sharetype='NS'`、`securitytype='EQTY'`、`securitysubtype='COM'`、`usincflg='Y'`、`issuertype` 为 `ACOR`/`CORP`）。
@@ -30,26 +29,13 @@
 - **市值：** `mthcap`，单位是千美元。
 - **Mkt-RF 和 RF：** 来自 `data/MktRf.csv`（Kenneth French），原始单位是百分点，读进来要除以 100。
 
-**peer reviewer 怎么复现：** 如果 `data/crsp_msf_v2.parquet` 不存在，`comparison.ipynb` 会用他们自己的 WRDS 账号重新下载，得到完全一样的文件。
+**peer reviewer 怎么复现：** 如果 `data/crsp_msf_v2.parquet` 不存在，`comparison.ipynb` 会用自己的 WRDS 账号重新下载，得到完全一样的文件。
 
 ---
 
-## 3. Data-quality check 的结果
+## 3. 投资池（universe）
 
-| 检查项 | 结果 | 说明 |
-|---|---|---|
-| 总行数 / 股票数 | 2,179,752 行 / 18,905 只 | 1990-01 到 2025-12 |
-| 同一股票同一月重复 | 0 | 干净 |
-| `mthret` 缺失 | 1.83% | 不影响结果：进投资池要求过去 60 个月收益都不缺 |
-| 收益 < -100% | 0 | 不可能的值没有出现 |
-| 收益 > +300% | 526 条 | 抽查过最大的几条（如 GME 2021-01 +1625%），都是真实事件，不是数据错误，所以**不做 winsorize** |
-| 不在 N/A/Q 交易所 | 1.80% | notebook 里删掉 |
-
----
-
-## 4. 投资池（universe）
-
-**按全组统一的规则：** 用 `backtest.select_universe`。每个月 t 月底，在"过去 60 个月收益都不缺、t 月市值 > 0"的股票里，取市值最大的 500 只。
+用 `backtest.select_universe`。每个月 t 月底，在"过去 60 个月收益都不缺、t 月市值 > 0"的股票里，取市值最大的 500 只。
 
 `universe_summary` 每个月统计一次（1995–2025，372 个月的平均）：
 
@@ -97,7 +83,6 @@
 | Minimum risk | 8.20% | 12.7% | 0.50 | -37.6% | 117% | 0.34 | $11.5 |
 | Risk parity | 11.62% | 14.0% | 0.69 | -48.9% | 62% | 0.85 | $30.2 |
 
-**大白话解读：**
 - **Minimum risk 真的最稳：** vol 最低、回撤最小、beta 只有 0.34。但这 30 年里收益也最低，Sharpe 反而最差，而且换手最高。
 - **Risk parity 的 Sharpe 最高：** 收益和 EW 差不多，但波动更小。
 - **EW 和 VW 很接近：** VW 换手只有 10%，几乎不用交易，是最便宜的基准。
