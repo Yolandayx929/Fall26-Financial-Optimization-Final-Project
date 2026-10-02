@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from estimation import estimate_single_factor
-from portfolios import min_risk_closed_form
+from min_risk import min_risk_closed_form
 
 # The closed form is ~3900x faster than the cvxpy model on n=500 (0.2ms vs 776ms),
 # which turns a 372-month backtest from ~5 minutes into a fraction of a second.
