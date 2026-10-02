@@ -2,7 +2,7 @@
 
 > 本人负责 topic 3 的 **risk parity** 组合，以及五个组合共用的 **performance evaluation**、
 > **risk-contribution diagnostics** 和 **alignment check**。
-> 只新增文件，不改动队友的 `estimation.py` / `portfolios.py` / `backtest.py`。
+> 只新增文件，不改动队友的 `estimation.py` / `min_risk.py` / `backtest.py`。
 
 ---
 
