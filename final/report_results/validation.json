@@ -1,0 +1,100 @@
+{
+  "performance": {
+    "ew": {
+      "months": 372.0,
+      "ann_return": 0.11630371360820568,
+      "ann_vol": 0.1574376591431795,
+      "sharpe": 0.6313137044044873,
+      "max_drawdown": -0.5169551446740555,
+      "cum_return": 29.286804544645168,
+      "ann_turnover": 0.6165544834550831,
+      "beta": 0.9769245991841735
+    },
+    "vw": {
+      "months": 372.0,
+      "ann_return": 0.11545513763775705,
+      "ann_vol": 0.14821459210837393,
+      "sharpe": 0.6556852698279112,
+      "max_drawdown": -0.49130846036095044,
+      "cum_return": 28.58117032474332,
+      "ann_turnover": 0.1001079238704285,
+      "beta": 0.943654929337966
+    },
+    "min_risk": {
+      "months": 372.0,
+      "ann_return": 0.08202602762259192,
+      "ann_vol": 0.12723746792464896,
+      "sharpe": 0.499218878262496,
+      "max_drawdown": -0.3754887643732163,
+      "cum_return": 10.517784193004118,
+      "ann_turnover": 1.1661681032929716,
+      "beta": 0.3394574155508546
+    },
+    "risk_parity": {
+      "months": 372.0,
+      "ann_return": 0.11621097048026696,
+      "ann_vol": 0.14038596942826387,
+      "sharpe": 0.6890233960362526,
+      "max_drawdown": -0.48902594319125714,
+      "cum_return": 29.208898098349607,
+      "ann_turnover": 0.6241047633897371,
+      "beta": 0.8456941500419738
+    },
+    "max_div": {
+      "months": 372.0,
+      "ann_return": 0.10345865688006128,
+      "ann_vol": 0.1410829949029487,
+      "sharpe": 0.6036894959487089,
+      "max_drawdown": -0.5362085279536952,
+      "cum_return": 20.1562188464009,
+      "ann_turnover": 1.6035708531673138,
+      "beta": 0.6725272265011765
+    }
+  },
+  "concentration": {
+    "Equally weighted": {
+      "div_ratio": 2.116662845623623,
+      "n_held": 500.0,
+      "eff_n_weight": 500.0,
+      "eff_n_risk": 437.06461487431096,
+      "top10_rc_share": 0.04532693715501593,
+      "systematic_share": 0.9912212246070209
+    },
+    "Value weighted": {
+      "div_ratio": 1.945934494820038,
+      "n_held": 500.0,
+      "eff_n_weight": 112.28173918581027,
+      "eff_n_risk": 102.93705926907694,
+      "top10_rc_share": 0.2480079455415706,
+      "systematic_share": 0.9755390458279488
+    },
+    "Minimum risk": {
+      "div_ratio": 2.8875086965721044,
+      "n_held": 45.115591397849464,
+      "eff_n_weight": 25.34400152480152,
+      "eff_n_risk": 25.34400152480152,
+      "top10_rc_share": 0.5397971554179966,
+      "systematic_share": 0.7316071329173549
+    },
+    "Risk parity": {
+      "div_ratio": 2.2571754883413147,
+      "n_held": 500.0,
+      "eff_n_weight": 423.63503468306146,
+      "eff_n_risk": 500.0,
+      "top10_rc_share": 0.020000000000000007,
+      "systematic_share": 0.989341864375018
+    },
+    "Maximum diversification": {
+      "div_ratio": 3.6607480235579777,
+      "n_held": 63.043010752688176,
+      "eff_n_weight": 36.72976792721852,
+      "eff_n_risk": 37.956589881485634,
+      "top10_rc_share": 0.4112982525150465,
+      "systematic_share": 0.6547997289423189
+    }
+  },
+  "max_kkt": 2.8461128583347896e-09,
+  "max_rp_dispersion": 2.4646951146678475e-14,
+  "months": 372,
+  "duration_seconds": 22.161576915998012
+}

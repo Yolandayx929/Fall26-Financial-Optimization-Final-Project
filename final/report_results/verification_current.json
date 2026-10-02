@@ -1,0 +1,113 @@
+{
+  "date": "2026-10-02",
+  "notebook_runs": [
+    {
+      "notebook": "project_demo.ipynb",
+      "code_cells": 13,
+      "seconds": 21.54,
+      "status": "PASS"
+    },
+    {
+      "notebook": "comparison.ipynb",
+      "code_cells": 11,
+      "seconds": 19.24,
+      "status": "PASS"
+    },
+    {
+      "notebook": "max_diversification.ipynb",
+      "code_cells": 11,
+      "seconds": 7.89,
+      "status": "PASS"
+    },
+    {
+      "notebook": "min_risk_port.ipynb",
+      "code_cells": 20,
+      "seconds": 13.8,
+      "status": "PASS"
+    },
+    {
+      "notebook": "risk_parity.ipynb",
+      "code_cells": 12,
+      "seconds": 11.23,
+      "status": "PASS"
+    }
+  ],
+  "checks": {
+    "original_vs_final": "Exact match for all monthly results and portfolio weights",
+    "all_months_independent_reconstruction": {
+      "months": 372,
+      "strategies": 5,
+      "max_return_gap": 5.551115123125783e-17,
+      "max_turnover_gap": 1.249000902703301e-16
+    },
+    "independent_performance_metrics": {
+      "max_gap": 3.3306690738754696e-16
+    },
+    "report_exports": "Performance, Exhibit 1, concentration and monthly-return CSVs match current execution",
+    "independent_dense_optimization": [
+      {
+        "month": 199412,
+        "strategy": "min_risk",
+        "gap": 8.956846930807671e-09
+      },
+      {
+        "month": 199412,
+        "strategy": "max_div",
+        "gap": 1.0887823975735955e-10
+      },
+      {
+        "month": 199412,
+        "strategy": "risk_parity",
+        "gap": 1.519012134826303e-09
+      },
+      {
+        "month": 200812,
+        "strategy": "min_risk",
+        "gap": 3.42106164508138e-08
+      },
+      {
+        "month": 200812,
+        "strategy": "max_div",
+        "gap": 2.380429187098798e-10
+      },
+      {
+        "month": 200812,
+        "strategy": "risk_parity",
+        "gap": 1.2159703461148141e-09
+      },
+      {
+        "month": 202511,
+        "strategy": "min_risk",
+        "gap": 3.145089100264897e-08
+      },
+      {
+        "month": 202511,
+        "strategy": "max_div",
+        "gap": 2.0324275595839936e-10
+      },
+      {
+        "month": 202511,
+        "strategy": "risk_parity",
+        "gap": 4.0671950573070714e-10
+      }
+    ],
+    "no_cache_branch": "SQL screens, download/cache round trip, cache reuse and connection cleanup on success/failure passed with a simulated WRDS connection",
+    "syntax_and_imports": "All original modules plus consolidated project.py passed",
+    "runtime_environment": {
+      "python": "3.10.9",
+      "numpy": "1.23.5",
+      "pandas": "2.2.3"
+    },
+    "subperiod_exports": "Subperiod result CSV matches current execution",
+    "submission_integrity": "Three-file ZIP integrity, anonymous code/notebook scan, and saved-output error scan passed",
+    "default_environment_rerun": "Final notebook passed again in default Python with no path overrides (20.6 seconds), after cache-path fallback was added"
+  },
+  "limitations": [
+    "Real WRDS credentials/authentication and a fresh live download were not tested.",
+    "All full backtests used the existing CRSP cache; results are gross of trading costs."
+  ],
+  "fixes": [
+    "Final notebook detects ../data/crsp_msf_v2.parquet when run inside this development repository.",
+    "Re-executed every final notebook code cell and replaced saved ArrowKeyError output with verified outputs."
+  ]
+}
