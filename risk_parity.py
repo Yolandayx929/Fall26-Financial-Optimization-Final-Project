@@ -1,14 +1,10 @@
-"""Risk parity (equal risk contribution) portfolios and risk contributions.
+"""Risk parity (equal risk contribution) portfolios.
 
-Risk decomposition. Portfolio volatility sigma_p = sqrt(x'Vx) is homogeneous of
-degree one in x, so Euler's theorem splits it exactly across the holdings:
-
-    MRC_i = d sigma_p / d x_i = (Vx)_i / sigma_p        marginal contribution
-    RC_i  = x_i * MRC_i                                 total contribution
-    sum_i RC_i = sigma_p
-
-Risk parity asks for RC_i = sigma_p / n for every i. For long-only portfolios
-this is the solution, rescaled to sum to one, of the strictly convex problem
+Risk parity asks every name to carry the same total risk contribution,
+RC_i = x_i (Vx)_i / sigma_p = sigma_p / n, with RC_i as defined by the Euler
+decomposition in `backtesting_analysis.risk_contributions`. For long-only
+portfolios this is the solution, rescaled to sum to one, of the strictly
+convex problem
 (Spinu 2013; Maillard, Roncalli and Teiletche 2010)
 
     min_y  1/2 y'Vy - sum_i log y_i,     y > 0
@@ -30,46 +26,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from backtesting_analysis import risk_contributions
 from estimation import FactorCov
-
-
-def _variance_gradient(x, cov) -> np.ndarray:
-    """Vx, for either a FactorCov or a dense matrix."""
-    x = np.asarray(x, dtype=float)
-    if isinstance(cov, FactorCov):
-        return cov.sigmaM2 * cov.beta * float(cov.beta @ x) + cov.omega2 * x
-    return np.asarray(cov, dtype=float) @ x
-
-
-def risk_contributions(x, cov) -> dict:
-    """Euler decomposition of portfolio volatility.
-
-    Parameters
-    ----------
-    x : weights, shape (n,).
-    cov : FactorCov or dense covariance matrix of shape (n, n).
-
-    Returns
-    -------
-    dict with
-      sigma_p : portfolio volatility sqrt(x'Vx)
-      mrc     : marginal risk contributions (Vx)_i / sigma_p
-      rc      : total risk contributions x_i * mrc_i, summing to sigma_p
-      share   : rc / sigma_p, the fraction of risk each name carries (sums to 1)
-      euler_gap : |sum(rc) - sigma_p| / sigma_p, zero up to rounding
-    """
-    x = np.asarray(x, dtype=float)
-    Vx = _variance_gradient(x, cov)
-    sigma_p = float(np.sqrt(max(x @ Vx, 0.0)))
-    mrc = Vx / sigma_p
-    rc = x * mrc
-    return dict(
-        sigma_p=sigma_p,
-        mrc=mrc,
-        rc=rc,
-        share=rc / sigma_p,
-        euler_gap=abs(rc.sum() - sigma_p) / sigma_p,
-    )
 
 
 def rc_dispersion(x, cov) -> float:
@@ -232,7 +190,7 @@ def risk_parity(cov: FactorCov, **_) -> dict:
 
     Returns the keys the backtest records (x, sigma2, n_held). Risk parity
     holds every name, so n_held is always n. Month-by-month risk-contribution
-    diagnostics are computed afterwards by `performance.risk_concentration`.
+    diagnostics are computed afterwards by `backtesting_analysis.risk_concentration`.
     """
     x = risk_parity_closed_form(cov)
     return dict(x=x, sigma2=cov.quad(x), n_held=int((x > 0).sum()))

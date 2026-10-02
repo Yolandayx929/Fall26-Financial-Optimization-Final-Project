@@ -10,8 +10,8 @@
 
 | 文件 | 内容 |
 |---|---|
-| `risk_parity.py` | `risk_parity_weights(Sigma)`（dense，Newton）、`risk_parity_closed_form(cov)`（single-factor，生产用）、`risk_parity_cvxpy`（仅交叉验证）、`risk_contributions`、`rc_dispersion`、backtest constructor `risk_parity` |
-| `performance.py` | `performance_metrics`、`performance_table`、`subperiod_table`、`drifted_turnover`、`cumulative_returns`、`drawdowns`、`estimate_covs`、`risk_concentration`、`check_alignment` |
+| `risk_parity.py` | `risk_parity_weights(Sigma)`（dense，Newton）、`risk_parity_closed_form(cov)`（single-factor，生产用）、`risk_parity_cvxpy`（仅交叉验证）、`rc_dispersion`、backtest constructor `risk_parity` |
+| `backtesting_analysis.py` | `performance_metrics`、`performance_table`、`subperiod_table`、`drifted_turnover`、`cumulative_returns`、`drawdowns`、`risk_contributions`（通用工具，所有组合共用）、`estimate_covs`、`risk_concentration`、`check_alignment` |
 | `analysis/risk_parity.ipynb` | 全流程 + 所有验证断言 + 图 |
 
 ---
@@ -20,6 +20,7 @@
 
 | 项 | 决定 | 理由 |
 |---|---|---|
+| 模块依赖 | 单向：`risk_parity` → `backtesting_analysis` → `estimation` | `risk_contributions` 是通用工具（分析所有组合），放在分析模块；RP 只借用它检查 RC 均等 |
 | 接入 backtest | 通过 `rolling_backtest(constructors=...)` 传入 | 不改 `backtest.py`，自动共享 universe / cov / delisting / turnover 口径 |
 | RP 定义 | `RC_i = x_i (Vx)_i / sigma_p` 全部相等，long-only | 标准 ERC |
 | 生产求解器 | single-factor 闭式：给定 `b = beta'y`，每个 `y_i` 是一元二次方程正根，bisection 解 `b` | 和 min risk 的 `beta_LO` 同构；0.6 ms vs cvxpy 1.3 s |
@@ -87,5 +88,5 @@ Armijo 永远不满足 → 步长被砍到 0，残差停在 6e-9。
 - [ ] 队友交来 `max_div` / `ew` / `vw` constructor 后，加进 notebook §4 的 `CONSTRUCTORS`，
       重跑；`check_alignment` 必须五个一起通过
 - [ ] 五组合的 Exhibit 1 风格表直接由 `performance_table` 生成
-- [ ] 最终打包只允许 1 notebook + 1 `.py`：`risk_parity.py` 与 `performance.py` 需随全组一起合并
+- [ ] 最终打包只允许 1 notebook + 1 `.py`：`risk_parity.py` 与 `backtesting_analysis.py` 需随全组一起合并
 - [ ] （可选）HRP 需要非 factor 的 `V`（见 COV_Notes 第 2 节），`risk_parity_weights` 已支持 dense 输入

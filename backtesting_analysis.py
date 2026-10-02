@@ -1,4 +1,7 @@
-"""Common performance evaluation, applied identically to every strategy.
+"""Backtesting analysis, applied identically to every strategy.
+
+Covers performance metrics, turnover, risk decomposition and concentration
+diagnostics, and the cross-strategy alignment checks.
 
 Conventions, chosen to match `backtest.summarize` exactly so the two can be
 cross-checked:
@@ -24,7 +27,6 @@ import numpy as np
 import pandas as pd
 
 from estimation import FactorCov, estimate_single_factor
-from risk_parity import risk_contributions
 
 
 # --------------------------------------------------------------------------
@@ -182,8 +184,54 @@ def subperiod_table(returns, weights=None, *, periods, **kwargs) -> pd.DataFrame
 
 
 # --------------------------------------------------------------------------
-# Risk-contribution diagnostics
+# Risk decomposition and concentration diagnostics
 # --------------------------------------------------------------------------
+
+def _variance_gradient(x, cov) -> np.ndarray:
+    """Vx, for either a FactorCov or a dense matrix."""
+    x = np.asarray(x, dtype=float)
+    if isinstance(cov, FactorCov):
+        return cov.sigmaM2 * cov.beta * float(cov.beta @ x) + cov.omega2 * x
+    return np.asarray(cov, dtype=float) @ x
+
+
+def risk_contributions(x, cov) -> dict:
+    """Euler decomposition of portfolio volatility.
+
+    sigma_p = sqrt(x'Vx) is homogeneous of degree one in x, so Euler's theorem
+    splits it exactly across the holdings:
+
+        MRC_i = d sigma_p / d x_i = (Vx)_i / sigma_p        marginal contribution
+        RC_i  = x_i * MRC_i                                 total contribution
+        sum_i RC_i = sigma_p
+
+    Parameters
+    ----------
+    x : weights, shape (n,).
+    cov : FactorCov or dense covariance matrix of shape (n, n).
+
+    Returns
+    -------
+    dict with
+      sigma_p : portfolio volatility sqrt(x'Vx)
+      mrc     : marginal risk contributions (Vx)_i / sigma_p
+      rc      : total risk contributions x_i * mrc_i, summing to sigma_p
+      share   : rc / sigma_p, the fraction of risk each name carries (sums to 1)
+      euler_gap : |sum(rc) - sigma_p| / sigma_p, zero up to rounding
+    """
+    x = np.asarray(x, dtype=float)
+    Vx = _variance_gradient(x, cov)
+    sigma_p = float(np.sqrt(max(x @ Vx, 0.0)))
+    mrc = Vx / sigma_p
+    rc = x * mrc
+    return dict(
+        sigma_p=sigma_p,
+        mrc=mrc,
+        rc=rc,
+        share=rc / sigma_p,
+        euler_gap=abs(rc.sum() - sigma_p) / sigma_p,
+    )
+
 
 def estimate_covs(weights_history, rets, mkt, rf, T: int = 60) -> dict:
     """Re-estimate the single-factor covariance used at each rebalance date.
