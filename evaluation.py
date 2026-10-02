@@ -46,7 +46,7 @@ def cumulative_returns(returns) -> pd.DataFrame | pd.Series:
 def drawdowns(returns) -> pd.DataFrame | pd.Series:
     """Drawdown from the running peak of the compounded path."""
     wealth = (1.0 + returns).cumprod()
-    return wealth / wealth.cummax() - 1.0
+    return wealth / wealth.cummax().clip(lower=1.0) - 1.0
 
 
 # --------------------------------------------------------------------------
@@ -127,7 +127,7 @@ def performance_metrics(
         ann_return=wealth[-1] ** (periods_per_year / len(r)) - 1.0,
         ann_vol=vol,
         sharpe=excess.mean() * periods_per_year / vol,
-        max_drawdown=float((wealth / np.maximum.accumulate(wealth) - 1.0).min()),
+        max_drawdown=float((wealth / np.maximum(1.0, np.maximum.accumulate(wealth)) - 1.0).min()),
         cum_return=wealth[-1] - 1.0,
         ann_turnover=np.nan,
     )

@@ -30,7 +30,7 @@
 `**_` 接收共享 loop 传入的 `caps` 等参数。
 
 DR 和 KKT 在验证、诊断阶段计算。绩效、turnover、risk concentration
-复用 `performance.py`，不另建一套 evaluation。
+复用 `evaluation.py`，不另建一套 evaluation。
 
 ## 3. 数学方法与关键决策
 
@@ -117,14 +117,84 @@ EW 仅用于共同 covariance 上的诊断参照，不在此处单独回测。
 ## 7. 与项目其他部分的衔接
 
 本 notebook 聚焦 MaxDiv，与 min risk、RP 作为平行的策略部分。
-最终五策略比较将 MaxDiv constructor 加入共同的 `constructors` dictionary，
+最终五策略比较已将 MaxDiv constructor 加入共同的 `constructors` dictionary，
 再用共享 evaluation 和 alignment checks 生成比较表。
 
-共同数据限制沿用其他部分：完整历史筛选偏向上市较久股票；当前 extract
-缺 share type；missing next-month return 按 RF 处理。EW/VW 正式回测、
+共同数据限制沿用其他部分：完整历史筛选偏向上市较久股票；missing next-month
+return 按 RF 处理。美国普通股筛选在 `project_data.py` 下载 SQL 中完成，
+分类字段未保留到缓存；已有缓存仍需保留来源记录。EW/VW 正式回测、
 替代 covariance、position caps 和最终提交打包由项目其他部分统一处理。
 
-共同 evaluation 尚有一个具体问题：`performance.drawdowns`、
-`performance_metrics` 和 `backtest.summarize` 的 running peak 未包含初始 wealth=1。
-首月亏损时，回撤曲线会低估起始回撤；本样本首月为 -1.19%。
-纳入初始 wealth 后，全样本最大回撤仍为 -53.62%，但曲线起始部分应由共同评估层统一修正。
+共同 evaluation 已修正 running peak，将初始 wealth=1 纳入回撤计算。
+首月 -1.19% 现被正确记录；全样本最大回撤仍为 -53.62%。
+
+MaxDiv 已加入 `analysis/comparison.ipynb` 的五策略共同回测、绩效表、
+累计收益、回撤、子区间以及 DR / risk concentration 比较。
+
+## 8. 独立复核（2026-10-02）
+
+**结论：在当前共同 covariance、universe 和缺失收益规则下，未发现 MaxDiv 推导、求解或收益计算错误；核心研究内容符合 project.pdf Topic 3。**
+这不代表真实未来表现有保证，也不代表数据简化假设消失。
+
+### 数学核查
+
+DR 最大化等价于 `min y'Vy`，约束 `sigma'y=1, y>=0`；
+`y=x/(sigma'x)`，归一化恢复 `x=y/sum(y)`。
+令 `z=Diag(sigma)y`，相关矩阵 `C=rho rho'+Diag(d)`，则
+`min z'Cz`、`sum(z)=1`。KKT 条件给出持有股票上的
+`d_i*z_i + rho_i*(rho'z) = q`，其中 `q=z'Cz`。
+正 beta 情形设 `h=q/(rho'z)`，由 `rho'z` 的一致性得到
+`sum rho_i*(h-rho_i)^+/d_i=1`。因此实现的阈值方程与权重公式一致。
+非正 beta 使用通用 QP，不套用正 beta 的阈值方程；零 market variance
+的解为 inverse volatility，而不是 inverse variance。
+
+### 本次实际运行的独立验证
+
+- 15 个 synthetic dense QP 对照：1/2/10/50/100 assets，各含 positive-beta、
+  mixed-beta、diagonal 情形；最大 DR 差 **1.08e-11**。
+- 9 个直接以 DR 为目标的 SLSQP 对照（没有 QP 变量变换）：最大 DR 差
+  **4.09e-14**；30 个 covariance scaling 检查通过。
+- 8 个真实 500-asset dense QP 对照，涵盖首末期、不同年代和 mixed-beta
+  月份；最大 DR 差 **2.04e-10**。参考 QP 显式构建 dense V，使用原始
+  `sigma'y=1` 约束，而不是复用实现的 factor-form QP。
+- 372 个月均独立重建 top-500 universe，确认只使用 t 及之前的 60 个月
+  数据，权重在 t 设置并获得 t+1 收益；long-only、fully-invested、
+  EW/VW 对齐检查通过。
+- 用 centered OLS 独立重估所有月份的 covariance；与共享 normal-equation
+  实现的 beta / residual variance 最大绝对差 **3.55e-15**。
+- 全样本独立 KKT 证书（correlation-coordinate、相对 q 归一化）：最大
+  residual **7.67e-9**。与 §4 的 `2.85e-9` 使用不同坐标/归一化口径。
+- 338 个正 beta 月份用排序和累计求和求阈值，完全不使用 bisection；
+  最大权重差 **4.77e-14**。其余 **34** 个月使用 QP。
+- 全部 372 个月、MaxDiv/EW/VW 的收益和 drifted turnover 独立重算：
+  最大绝对差分别 **5.55e-17**、**1.54e-16**。
+- 用独立公式重算几何年化收益、excess-return vol / Sharpe 和包含初始本金
+  的 max drawdown；三个策略的最大指标差 **2.22e-16**。
+- MaxDiv 在每个 formation date 的 DR 均不低于 EW 和 VW；平均 DR
+  为 **3.660748 / 2.116663 / 1.945934**（MaxDiv / EW / VW）。
+
+### Return 低于 EW/VW 的解释边界
+
+MaxDiv 优化的是估计 covariance 下的 DR，不使用 expected-return forecast，
+因此不存在必须跑赢 EW/VW 的收益约束。只有在期望 excess return 向量与
+`sigma` 成比例等附加假设下，DR 才与模型 Sharpe 成比例；本项目没有估计或
+验证这一收益假设。即使成立，也不能保证 realized return 排名。
+
+本样本 MaxDiv 年化 return **10.35%**，EW **11.63%**，VW **11.55%**；
+vol 分别 **14.11% / 15.74% / 14.82%**，Sharpe 分别
+**0.604 / 0.631 / 0.656**。MaxDiv 实际收益较低的具体原因没有被这些核查
+识别，不能直接归因于某个 sector、缺失收益或 covariance error。
+
+### 要求与限制
+
+Topic 3 要求 fully-invested long-only 三种优化策略，与 EW/VW 的共同
+out-of-sample summary 和 cumulative-return comparison，没有要求任何
+优化策略必须跑赢 benchmark。MaxDiv 核心内容及五策略比较已满足这些项。
+匿名 slides、可复现 demo 打包和课程参考 Exhibit 的版式复核属于全组交付。
+
+共同限制仍需披露：完整历史筛选偏向较老股票；missing next-month return
+按 RF 计是简化假设；single-factor 忽略 residual cross-correlation；结果未扣
+交易成本。下载 SQL 中有 common-stock 筛选，但缓存本身未保留分类字段，
+因此本次无法仅凭缓存独立确认下载来源，也未用 WRDS 重新下载数据。
+HW4 原题及教授代码不在本 repository；本次验证的是项目描述与数学等价性，
+并非对缺失原文件作逐字逐行核对。

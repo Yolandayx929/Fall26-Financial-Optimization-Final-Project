@@ -36,7 +36,7 @@ def max_diversification(cov: FactorCov, weight_tol: float = 1e-8, **_) -> dict:
 
     Use z_i = sigma_i*y_i for numerical scaling, then recover y and
     normalize x = y / sum(y). The objective stays in factor form.
-    Small residual weights are removed, as in `portfolios.min_risk`.
+    Small residual weights are removed, as in `min_risk.min_risk`.
     """
     import cvxpy as cp
 

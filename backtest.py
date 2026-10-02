@@ -145,7 +145,7 @@ def summarize(panel, periods_per_year: int = 12) -> pd.DataFrame:
         total = group["ret"].values
         vol = excess.std(ddof=1) * np.sqrt(periods_per_year)
         cumulative = np.cumprod(1.0 + total)
-        drawdown = cumulative / np.maximum.accumulate(cumulative) - 1.0
+        drawdown = cumulative / np.maximum(1.0, np.maximum.accumulate(cumulative)) - 1.0
         rows[name] = dict(
             ann_return=cumulative[-1] ** (periods_per_year / len(total)) - 1.0,
             ann_vol=vol,
