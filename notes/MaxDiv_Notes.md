@@ -65,7 +65,6 @@ Bisection 解标量方程：
 ## 4. 验证
 
 Notebook 中保留真实首期 QP 对照、公式 (4) 重建、全样本 KKT 和绩效检查。
-独立 dense QP 和数学特例在本次复核中单独运行，不依赖已删除的 tests 目录。
 
 - 教授的 10-asset case 和随机 10/50/100-asset case：与独立 dense QP 的 DR 一致。
 - 真实首期 rebalance：QP 与 closed form 的 DR 差小于 `1e-6`；公式 (4) 重建权重通过。
