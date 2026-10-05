@@ -3,15 +3,20 @@
 Reading order
 -------------
 1. Shared data loading, cleaning and investable-universe selection.
-2. Shared single-factor covariance model and parameter estimation.
-3. Independent portfolio rules: EW/VW, minimum risk, MaxDiv, risk parity.
+2. Shared single-factor covariance model and parameter estimation, plus the
+   two alternative estimators from project.pdf: constant correlation and the
+   shrunk sample covariance.
+3. Independent portfolio rules: EW/VW, minimum risk, MaxDiv, risk parity
+   (3E: the same rules on the shrunk sample covariance).
 4. Shared rolling out-of-sample backtest.
 5. Shared performance metrics, risk diagnostics and alignment checks.
+6. Report tables and figures shared by every covariance estimator.
 
-Each portfolio rule consumes the same FactorCov and returns x, sigma2 and
-n_held. The rules can be reviewed independently; the backtest evaluates them
-on identical dates and universes. Risk-parity diagnostics use the shared
-risk_contributions function in section 5, resolved when called after import.
+Each portfolio rule consumes the same covariance estimate and returns x,
+sigma2 and n_held. The rules can be reviewed independently; the backtest
+evaluates them on identical dates and universes. Risk-parity diagnostics use
+the shared risk_contributions function in section 5, resolved when called
+after import.
 
 Run project_demo.ipynb for the complete experiment. Optional optimization
 references import cvxpy only when used; no commercial solver is required.
@@ -310,6 +315,161 @@ def estimate_single_factor(R, rM, permno=None) -> FactorCov:
         beta_hat=beta_hat,
         alpha=alpha,
     )
+
+
+# ----------------------------------------------------------------------
+# Alternative estimators (last page of project.pdf)
+# ----------------------------------------------------------------------
+#
+#     constant correlation   V = rho * s s' + (1 - rho) * Diag(s)^2
+#     shrunk sample          V = Vhat + lambda * (C - Vhat),   Vhat = R'R
+#
+# The constant-correlation matrix is again "rank one plus diagonal", so it is
+# returned as a FactorCov with sigmaM2 = 1 and beta = sqrt(rho) * s, and every
+# closed-form optimizer applies unchanged. Its `beta` field is then a loading
+# on the common correlation component, not a market beta; the backtest takes
+# market betas from the single-factor regression whatever the risk model.
+
+
+def _check_window(R) -> np.ndarray:
+    R = np.asarray(R, dtype=float)
+    if R.ndim != 2 or R.shape[0] <= 2:
+        raise ValueError(f"expected a (T, n) window with T > 2, got shape {R.shape}")
+    if not np.isfinite(R).all():
+        raise ValueError("R contains NaN or inf; clean the universe upstream")
+    return R
+
+
+def estimate_constant_correlation(R, permno=None) -> FactorCov:
+    """Constant-correlation covariance on one estimation window.
+
+    rho is the average of all pairwise sample correlations. Volatilities are
+    sample standard deviations whose logs are shrunk 1/3 towards their
+    cross-sectional mean. rho can be recovered as (beta / sigma)^2.
+    """
+    R = _check_window(R)
+    T, n = R.shape
+    s = R.std(axis=0, ddof=1)
+
+    # The entries of the correlation matrix sum to ||Z 1||^2 / (T - 1), with Z
+    # the standardised returns; removing the n diagonal ones leaves the
+    # pairwise correlations, without forming the n x n matrix.
+    Z = (R - R.mean(axis=0)) / s
+    rho = (float(np.sum(Z.sum(axis=1) ** 2)) / (T - 1) - n) / (n * (n - 1))
+    if not 0.0 < rho < 1.0:
+        raise ValueError(f"average correlation {rho:.3f} is outside (0, 1)")
+
+    log_s = np.log(s)
+    s = np.exp((2.0 / 3.0) * log_s + (1.0 / 3.0) * log_s.mean())
+
+    unused = np.full(n, np.nan)
+    return FactorCov(
+        permno=np.arange(n) if permno is None else np.asarray(permno),
+        beta=np.sqrt(rho) * s,
+        omega2=(1.0 - rho) * s**2,
+        sigmaM2=1.0,
+        sigma=s,
+        beta_hat=unused,
+        alpha=unused,
+    )
+
+
+@dataclass
+class ShrunkSampleCov:
+    """Sample covariance shrunk towards a constant target (CdST 2006 appendix).
+
+    With R the (T, n) window of excess returns, Vhat = R'R and the target
+    C = (dbar - cbar) I + cbar 11', the estimate (Vhat + lam (C - Vhat)) / T is
+    stored as
+
+        V = a R'R + b I + c 11',   a = (1-lam)/T, b = lam (dbar-cbar)/T, c = lam cbar/T
+
+    so x'Vx and Vx cost O(nT) and the optimizers never need the dense matrix.
+    Dividing by T only fixes the scale of predicted volatility; no portfolio
+    weight depends on it.
+    """
+
+    permno: np.ndarray
+    R: np.ndarray
+    lam: float
+    a: float
+    b: float
+    c: float
+    sigma: np.ndarray
+
+    @property
+    def n(self) -> int:
+        return len(self.permno)
+
+    def matvec(self, x) -> np.ndarray:
+        """Vx."""
+        x = np.asarray(x, dtype=float)
+        return self.a * (self.R.T @ (self.R @ x)) + self.b * x + self.c * x.sum()
+
+    def quad(self, x) -> float:
+        """Portfolio variance x'Vx."""
+        x = np.asarray(x, dtype=float)
+        Rx = self.R @ x
+        return self.a * float(Rx @ Rx) + self.b * float(x @ x) + self.c * float(x.sum()) ** 2
+
+    def exante_vol(self, x) -> float:
+        return float(np.sqrt(max(self.quad(x), 0.0)))
+
+    def to_dense(self) -> np.ndarray:
+        return self.a * (self.R.T @ self.R) + self.b * np.eye(self.n) + self.c
+
+
+def estimate_shrunk_sample(R, permno=None) -> ShrunkSampleCov:
+    """Shrunk sample covariance on one estimation window, as in project.pdf.
+
+    Sample means are ignored (Vhat = R'R), as the PDF and the CdST appendix do.
+    The intensity is lam = max(0, min(1, lam_bar)) with
+
+        lam_bar = [sum_ij sum_t r_it^2 r_jt^2 - (1/T) sum_ij (sum_t r_it r_jt)^2]
+                  / trace((Vhat - C)^2)
+
+    The first sum equals sum_t (sum_i r_it^2)^2 and the second is the squared
+    Frobenius norm of Vhat, so neither needs a loop over pairs.
+    """
+    R = _check_window(R)
+    T, n = R.shape
+    Vhat = R.T @ R
+    diag = np.diag(Vhat)
+    dbar = float(diag.mean())
+    cbar = float((Vhat.sum() - diag.sum()) / (n * (n - 1)))
+
+    numerator = float(np.sum((R**2).sum(axis=1) ** 2)) - float(np.sum(Vhat**2)) / T
+    gap = Vhat - cbar
+    gap[np.diag_indices(n)] = diag - dbar
+    lam = float(np.clip(numerator / float(np.sum(gap**2)), 0.0, 1.0))
+
+    a, b, c = (1.0 - lam) / T, lam * (dbar - cbar) / T, lam * cbar / T
+    if b <= 0:
+        # Without a positive multiple of I the matrix has rank <= T + 1 < n.
+        raise ValueError(f"shrunk covariance is singular (lam={lam:.3f})")
+    return ShrunkSampleCov(
+        permno=np.arange(n) if permno is None else np.asarray(permno),
+        R=R,
+        lam=lam,
+        a=a,
+        b=b,
+        c=c,
+        sigma=np.sqrt(a * diag + b + c),
+    )
+
+
+ESTIMATORS = ("single_factor", "const_corr", "shrunk_sample")
+
+
+def estimate_covariance(estimator: str, R, rM, permno=None):
+    """Dispatch to one of ESTIMATORS. rM is only used by the single-factor model."""
+    if estimator == "single_factor":
+        return estimate_single_factor(R, rM, permno=permno)
+    if estimator == "const_corr":
+        return estimate_constant_correlation(R, permno=permno)
+    if estimator == "shrunk_sample":
+        return estimate_shrunk_sample(R, permno=permno)
+    raise ValueError(f"unknown estimator {estimator!r}; expected one of {ESTIMATORS}")
 
 
 
@@ -615,10 +775,13 @@ def diversification_ratio(x: np.ndarray, cov: FactorCov) -> float:
 
 
 def optimality_residuals(x: np.ndarray, cov: FactorCov) -> dict:
-    """Relative KKT residuals for the QP, used in numerical validation."""
+    """Relative KKT residuals for the QP, used in numerical validation.
+
+    Works for any covariance object accepted by `risk_contributions`.
+    """
     y = np.asarray(x) / float(cov.sigma @ x)
-    vy = cov.sigmaM2 * cov.beta * (cov.beta @ y) + cov.omega2 * y
-    q = cov.quad(y)
+    vy = _variance_gradient(y, cov)
+    q = float(y @ vy)
     slack = vy - q * cov.sigma
     scale = max(np.max(np.abs(vy)), np.max(np.abs(q * cov.sigma)), np.finfo(float).tiny)
     return dict(
@@ -825,6 +988,73 @@ def risk_parity(cov: FactorCov, **_) -> dict:
     return dict(x=x, sigma2=cov.quad(x), n_held=int((x > 0).sum()))
 
 
+# ======================================================================
+# 3E. The same rules on the shrunk sample covariance
+# ======================================================================
+# The constant-correlation estimate is a FactorCov, so it reuses the closed
+# forms above. The shrunk sample covariance has no one-factor structure: the
+# minimum-risk and MaxDiv QPs are solved with cvxpy in the low-rank form
+# a ||R x||^2 + b ||x||^2 + c (1'x)^2, and risk parity uses Newton's method on
+# the dense matrix (risk_parity_weights).
+
+
+def _shrunk_quad(cov: ShrunkSampleCov, x, scale=None):
+    """cvxpy expression for x'Vx, or for (x/scale)'V(x/scale)."""
+    import cvxpy as cp
+
+    R = cov.R if scale is None else cov.R / scale
+    y = x if scale is None else cp.multiply(1.0 / scale, x)
+    return cov.a * cp.sum_squares(R @ x) + cov.b * cp.sum_squares(y) + cov.c * cp.square(cp.sum(y))
+
+
+def min_risk_shrunk(cov: ShrunkSampleCov, weight_tol: float = 1e-5, **_) -> dict:
+    """min x'Vx s.t. 1'x = 1, x >= 0; dust below weight_tol removed as in `min_risk`."""
+    import cvxpy as cp
+
+    x = cp.Variable(cov.n, nonneg=True)
+    problem = cp.Problem(cp.Minimize(_shrunk_quad(cov, x)), [cp.sum(x) == 1])
+    _max_diversification_solve(problem)
+
+    w = np.maximum(np.asarray(x.value, dtype=float), 0.0)
+    w[w < weight_tol] = 0.0
+    w /= w.sum()
+    return dict(x=w, sigma2=cov.quad(w), n_held=int((w > 0).sum()))
+
+
+def max_diversification_shrunk(cov: ShrunkSampleCov, weight_tol: float = 1e-8, **_) -> dict:
+    """Same QP as `max_diversification`: min y'Vy s.t. sigma'y = 1, y >= 0,
+    solved in z = sigma * y for scaling."""
+    import cvxpy as cp
+
+    z = cp.Variable(cov.n, nonneg=True)
+    problem = cp.Problem(cp.Minimize(_shrunk_quad(cov, z, scale=cov.sigma)), [cp.sum(z) == 1])
+    _max_diversification_solve(problem)
+
+    y = np.maximum(np.asarray(z.value, dtype=float), 0.0) / cov.sigma
+    x = y / y.sum()
+    x[x < weight_tol] = 0.0
+    x /= x.sum()
+    return dict(x=x, sigma2=cov.quad(x), n_held=int((x > 0).sum()))
+
+
+def risk_parity_shrunk(cov: ShrunkSampleCov, **_) -> dict:
+    x = risk_parity_weights(cov.to_dense())
+    return dict(x=x, sigma2=cov.quad(x), n_held=int((x > 0).sum()))
+
+
+def strategies(estimator: str = "single_factor") -> dict:
+    """The five constructors for one covariance estimator, with identical keys."""
+    if estimator not in ESTIMATORS:
+        raise ValueError(f"unknown estimator {estimator!r}; expected one of {ESTIMATORS}")
+    if estimator == "shrunk_sample":
+        optimized = dict(min_risk=min_risk_shrunk, risk_parity=risk_parity_shrunk,
+                         max_div=max_diversification_shrunk)
+    else:
+        optimized = dict(min_risk=min_risk_closed_form, risk_parity=risk_parity,
+                         max_div=max_diversification_closed_form)
+    return dict(ew=equal_weight, vw=value_weight, **optimized)
+
+
 
 # ======================================================================
 # 4. Shared rolling out-of-sample backtest
@@ -868,8 +1098,14 @@ def rolling_backtest(
     start=None,
     end=None,
     constructors: dict | None = None,
+    estimator: str = "single_factor",
 ):
     """Run the rolling backtest.
+
+    `estimator` selects the risk model the constructors receive (see
+    ESTIMATORS; use the matching `strategies(estimator)`). The single-factor
+    regression is run in every case, because the recorded ex-ante beta is
+    always the market beta from that regression.
 
     Returns
     -------
@@ -900,6 +1136,9 @@ def rolling_backtest(
         cov = estimate_single_factor(
             excess, mkt.loc[window].values, permno=universe.values
         )
+        model = cov if estimator == "single_factor" else estimate_covariance(
+            estimator, excess, None, permno=universe.values
+        )
 
         # Out-of-sample month. If a holding has no return at t+1 its weight is
         # assumed to earn the risk-free rate. Renormalising over the survivors
@@ -910,7 +1149,7 @@ def rolling_backtest(
         for name, construct in constructors.items():
             # caps are passed through for constructors that need them; those that
             # do not simply absorb the keyword.
-            result = construct(cov, caps=caps.loc[t, universe].values)
+            result = construct(model, caps=caps.loc[t, universe].values)
             x = result["x"]
             r_portfolio = float(x @ r_next)
 
@@ -936,10 +1175,10 @@ def rolling_backtest(
                     ret=r_portfolio,
                     exret=r_portfolio - float(rf.loc[t_next]),
                     pred_vol=float(np.sqrt(max(result["sigma2"], 0.0))),
-                    exante_beta=cov.exante_beta(x),
+                    exante_beta=cov.exante_beta(x),  # single-factor market beta
                     n_held=result["n_held"],
-                    # only the closed form exposes the holding threshold
-                    beta_LO=result.get("beta_LO", np.nan),
+                    # only the single-factor closed form has a beta threshold
+                    beta_LO=result.get("beta_LO", np.nan) if model is cov else np.nan,
                     eff_n=float(1.0 / np.sum(x**2)),
                     max_w=float(x.max()),
                     turnover=turnover,
@@ -1163,10 +1402,12 @@ def subperiod_table(returns, weights=None, *, periods, **kwargs) -> pd.DataFrame
 # --------------------------------------------------------------------------
 
 def _variance_gradient(x, cov) -> np.ndarray:
-    """Vx, for either a FactorCov or a dense matrix."""
+    """Vx, for a FactorCov, a ShrunkSampleCov or a dense matrix."""
     x = np.asarray(x, dtype=float)
     if isinstance(cov, FactorCov):
         return cov.sigmaM2 * cov.beta * float(cov.beta @ x) + cov.omega2 * x
+    if isinstance(cov, ShrunkSampleCov):
+        return cov.matvec(x)
     return np.asarray(cov, dtype=float) @ x
 
 
@@ -1183,7 +1424,7 @@ def risk_contributions(x, cov) -> dict:
     Parameters
     ----------
     x : weights, shape (n,).
-    cov : FactorCov or dense covariance matrix of shape (n, n).
+    cov : FactorCov, ShrunkSampleCov or dense covariance matrix of shape (n, n).
 
     Returns
     -------
@@ -1208,13 +1449,14 @@ def risk_contributions(x, cov) -> dict:
     )
 
 
-def estimate_covs(weights_history, rets, mkt, rf, T: int = 60) -> dict:
-    """Re-estimate the single-factor covariance used at each rebalance date.
+def estimate_covs(weights_history, rets, mkt, rf, T: int = 60,
+                  estimator: str = "single_factor") -> dict:
+    """Re-estimate the covariance used at each rebalance date.
 
     `rolling_backtest` does not store its covariance estimates, so they are
     rebuilt here from the same window and universe (the non-NaN columns of
-    each weight row). Each stock's regression is independent of the others,
-    so column order does not matter and the estimates are identical.
+    each weight row). Every estimator treats stocks symmetrically, so column
+    order does not matter and the estimates are identical.
     """
     months = rets.index
     covs = {}
@@ -1223,12 +1465,18 @@ def estimate_covs(weights_history, rets, mkt, rf, T: int = 60) -> dict:
         i = months.get_loc(t)
         window = months[i - T + 1 : i + 1]
         excess = rets.loc[window, universe].values - rf.loc[window].values[:, None]
-        covs[t] = estimate_single_factor(excess, mkt.loc[window].values, permno=universe.values)
+        covs[t] = estimate_covariance(estimator, excess, mkt.loc[window].values, permno=universe.values)
     return covs
 
 
-def risk_concentration(weights_history: pd.DataFrame, covs: dict) -> pd.DataFrame:
+def risk_concentration(weights_history: pd.DataFrame, covs: dict,
+                       factor_covs: dict | None = None) -> pd.DataFrame:
     """How concentrated is each month's ex-ante risk?
+
+    Risk contributions use `covs`, the model the portfolios were built on. The
+    market share of variance is measured with the single-factor model: `covs`
+    itself by default, or `factor_covs` (same dates and universes) when `covs`
+    comes from another estimator, so the column is comparable across models.
 
     For each rebalance date, with p_i = RC_i / sigma_p the share of risk name i
     carries:
@@ -1240,7 +1488,7 @@ def risk_concentration(weights_history: pd.DataFrame, covs: dict) -> pd.DataFram
       top10_rc_share  share of risk carried by the 10 largest contributors
       rc_dispersion   max |n_held * p_i - 1| over held names (0 = risk parity)
       systematic_share  fraction of variance from the market factor,
-                        sigmaM2 (beta'x)^2 / x'Vx (FactorCov only)
+                        sigmaM2 (beta'x)^2 / x'Vx under the single-factor model
       pred_vol        ex-ante monthly volatility
     """
     rows = {}
@@ -1258,8 +1506,13 @@ def risk_concentration(weights_history: pd.DataFrame, covs: dict) -> pd.DataFram
             rc_dispersion=float(np.abs(held.sum() * p[held] - 1.0).max()),
             pred_vol=rc["sigma_p"],
         )
-        if isinstance(cov, FactorCov):
-            row["systematic_share"] = cov.sigmaM2 * float(cov.beta @ x) ** 2 / rc["sigma_p"] ** 2
+        if factor_covs is None:
+            if isinstance(cov, FactorCov):
+                row["systematic_share"] = cov.sigmaM2 * float(cov.beta @ x) ** 2 / rc["sigma_p"] ** 2
+        else:
+            market = factor_covs[t]
+            xm = weights_history.loc[t].reindex(market.permno).fillna(0.0).values
+            row["systematic_share"] = market.sigmaM2 * float(market.beta @ xm) ** 2 / market.quad(xm)
         rows[t] = row
     return pd.DataFrame(rows).T.rename_axis("rebalance")
 
@@ -1317,3 +1570,155 @@ def check_alignment(returns: pd.DataFrame, weights: dict, asset_returns: pd.Data
     if strict and problems:
         raise AssertionError("alignment check failed:\n  " + "\n  ".join(problems))
     return problems
+
+
+# ======================================================================
+# 6. Report tables and figures
+# ======================================================================
+# Used by the notebook for the single-factor results (sections 6-8) and again,
+# unchanged, for each alternative covariance estimator. matplotlib is imported
+# only when a figure is drawn.
+
+COLORS = {"max_div": "#eb6834", "min_risk": "#2a78d6", "risk_parity": "#1baf7a",
+          "ew": "#eda100", "vw": "#e87ba4"}
+LABELS = {"max_div": "Maximum diversification", "min_risk": "Minimum risk",
+          "risk_parity": "Risk parity", "ew": "Equally weighted", "vw": "Value weighted"}
+ESTIMATOR_COLORS = {"single_factor": "#1f2d5c", "const_corr": "#8e44ad", "shrunk_sample": "#16a3b8"}
+ESTIMATOR_LABELS = {"single_factor": "Single factor", "const_corr": "Constant correlation",
+                    "shrunk_sample": "Shrunk sample"}
+CONCENTRATION_COLUMNS = ["div_ratio", "n_held", "eff_n_weight", "eff_n_risk",
+                         "top10_rc_share", "systematic_share"]
+
+
+def _month_starts(index) -> pd.DatetimeIndex:
+    """yyyymm integers to timestamps for plotting."""
+    return pd.PeriodIndex([str(d) for d in index], freq="M").to_timestamp()
+
+
+def plot_cumulative(returns: pd.DataFrame, title: str, colors=None, labels=None):
+    """Growth of $1 on a log scale, one line per column."""
+    import matplotlib.pyplot as plt
+
+    colors, labels = colors or COLORS, labels or LABELS
+    when = _month_starts(returns.index)
+    wealth = 1.0 + cumulative_returns(returns)
+    fig, ax = plt.subplots(figsize=(11, 5))
+    for k in returns.columns:
+        ax.plot(when, wealth[k], color=colors.get(k),
+                label=f"{labels.get(k, k)} (${wealth[k].iloc[-1]:.1f})")
+    ax.set_yscale("log"); ax.set_ylabel("growth of $1 (log scale)")
+    ax.set_title(title)
+    ax.legend(frameon=False, loc="upper left")
+    fig.tight_layout()
+    return fig
+
+
+def plot_drawdowns(returns: pd.DataFrame, title: str = "Drawdown from running peak",
+                   colors=None, labels=None):
+    import matplotlib.pyplot as plt
+
+    colors, labels = colors or COLORS, labels or LABELS
+    when = _month_starts(returns.index)
+    dd = drawdowns(returns)
+    fig, ax = plt.subplots(figsize=(11, 4.5))
+    for k in returns.columns:
+        ax.plot(when, dd[k], color=colors[k], label=labels[k])
+    ax.set(ylabel="Drawdown", title=title)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    return fig
+
+
+def concentration_diagnostics(weights: dict, covs: dict, factor_covs: dict | None = None) -> dict:
+    """`risk_concentration` plus the diversification ratio, per strategy."""
+    conc = {k: risk_concentration(w, covs, factor_covs) for k, w in weights.items()}
+    for k, w in weights.items():
+        conc[k]["div_ratio"] = pd.Series({
+            t: diversification_ratio(w.loc[t].reindex(c.permno).values, c)
+            for t, c in covs.items()
+        })
+    return conc
+
+
+def diversification_checks(weights: dict, covs: dict, conc: dict) -> dict:
+    """Formation-date checks, under the covariance the portfolios were built on.
+
+    dr_excess          max over dates and strategies of DR - DR(MaxDiv); <= 0 up to rounding
+    max_kkt            largest relative KKT residual of the MaxDiv QP
+    max_rp_dispersion  largest deviation from equal risk contributions in risk parity
+    """
+    dr = pd.DataFrame({k: c.div_ratio for k, c in conc.items()})
+    return dict(
+        dr_excess=float(dr.sub(dr["max_div"], axis=0).to_numpy().max()),
+        max_kkt=max(max(optimality_residuals(
+            weights["max_div"].loc[t].reindex(c.permno).values, c).values())
+            for t, c in covs.items()),
+        max_rp_dispersion=max(rc_dispersion(
+            weights["risk_parity"].loc[t].reindex(c.permno).values, c)
+            for t, c in covs.items()),
+    )
+
+
+def concentration_table(conc: dict) -> pd.DataFrame:
+    """Time-averaged concentration diagnostics, one row per strategy."""
+    return pd.DataFrame({LABELS[k]: c[CONCENTRATION_COLUMNS].mean() for k, c in conc.items()}).T
+
+
+def plot_diversification(conc: dict, title_suffix: str = ""):
+    """Diversification ratio and market share of variance at each formation date."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(1, 2, figsize=(13, 4.5))
+    for k, c in conc.items():
+        when = _month_starts(c.index)
+        ax[0].plot(when, c.div_ratio, color=COLORS[k], label=LABELS[k])
+        ax[1].plot(when, c.systematic_share, color=COLORS[k], label=LABELS[k])
+    ax[0].set(ylabel="Diversification ratio", title="Estimated diversification at formation" + title_suffix)
+    ax[1].set(ylabel="Market share of variance", title="Factor concentration" + title_suffix)
+    ax[0].legend(frameon=False); ax[1].legend(frameon=False)
+    fig.tight_layout()
+    return fig
+
+
+def sector_weight(weights_history: pd.DataFrame, sic: pd.DataFrame,
+                  lo: int = 4900, hi: int = 4999) -> pd.Series:
+    """Weight in SIC codes lo..hi at each rebalance date (default: utilities, SIC 49)."""
+    codes = sic.reindex(index=weights_history.index, columns=weights_history.columns).astype(float)
+    return weights_history.where((codes >= lo) & (codes <= hi)).sum(axis=1)
+
+
+def estimator_comparison(runs: dict, *, rf, mkt, sic,
+                         optimized=("min_risk", "max_div", "risk_parity")) -> pd.DataFrame:
+    """Each optimized strategy under each estimator, with EW and VW as references.
+
+    runs maps estimator -> dict(returns=..., weights=..., panel=...). EW and VW do
+    not use a covariance; their predicted/realized ratio uses the single-factor model.
+    """
+    def row(estimator, k):
+        run = runs[estimator]
+        perf = performance_metrics(run["returns"][k], rf=rf, mkt=mkt)
+        ref = summarize(run["panel"]).loc[k]
+        return {
+            "CAGR (%)": 100 * perf["ann_return"],
+            "Volatility (%)": 100 * perf["ann_vol"],
+            "Sharpe": perf["sharpe"],
+            "Max drawdown (%)": 100 * perf["max_drawdown"],
+            "Realized beta": perf["beta"],
+            "Turnover (%)": 100 * ref["ann_turnover"],
+            "Pred / realized vol": ref["pred_over_realized"],
+            "Avg holdings": ref["avg_n_held"],
+            "Utilities weight (%)": 100 * sector_weight(run["weights"][k], sic).mean(),
+        }
+
+    rows = {(LABELS[k], ESTIMATOR_LABELS[e]): row(e, k) for k in optimized for e in runs}
+    for k in ("ew", "vw"):
+        rows[(LABELS[k], "Benchmark")] = row("single_factor", k)
+    return pd.DataFrame(rows).T.rename_axis(["Strategy", "Risk model"])
+
+
+def estimator_returns(runs: dict, strategy: str) -> pd.DataFrame:
+    """One strategy's monthly returns under every estimator, plus EW and VW."""
+    out = pd.DataFrame({e: run["returns"][strategy] for e, run in runs.items()})
+    for k in ("ew", "vw"):
+        out[k] = runs["single_factor"]["returns"][k]
+    return out
