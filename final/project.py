@@ -1722,3 +1722,83 @@ def estimator_returns(runs: dict, strategy: str) -> pd.DataFrame:
     for k in ("ew", "vw"):
         out[k] = runs["single_factor"]["returns"][k]
     return out
+
+
+def event_window(market: pd.Series, peak: int, trough: int) -> dict:
+    """Crash and rebound months of one market drawdown.
+
+    market : monthly market total returns indexed by yyyymm.
+    peak   : last month at the market's previous high (the event starts after it).
+    trough : month in which the market's drawdown bottoms out.
+
+    The crash runs from the month after `peak` to `trough`; the rebound runs
+    from the month after `trough` to the first month in which the market's
+    wealth regains its level at `peak`. Both dates are checked against the data.
+    """
+    months = market.index
+    wealth = (1.0 + market).cumprod()
+    drawdown = wealth / wealth.cummax() - 1.0
+    if drawdown.loc[peak] != 0.0:
+        raise ValueError(f"{peak} is not a market high")
+    if drawdown.loc[peak:trough].idxmin() != trough:
+        raise ValueError(f"{trough} is not the bottom of the drawdown after {peak}")
+
+    after = wealth.loc[months[months.get_loc(trough) + 1]:]
+    recovered = after.index[after >= wealth.loc[peak]]
+    if len(recovered) == 0:
+        raise ValueError(f"the market has not regained its {peak} level")
+    return dict(peak=peak, trough=trough, recovery=int(recovered[0]),
+                crash=(int(months[months.get_loc(peak) + 1]), trough),
+                rebound=(int(months[months.get_loc(trough) + 1]), int(recovered[0])))
+
+
+def event_study(returns: pd.DataFrame, windows: dict) -> pd.DataFrame:
+    """Crash return, maximum drawdown during the crash, and rebound return.
+
+    windows maps an event label to the output of `event_window`. Wealth is
+    measured from 1 at the end of the peak month, so the drawdown includes any
+    loss from that starting level.
+    """
+    rows = {}
+    for label, w in windows.items():
+        crash = returns.loc[w["crash"][0]:w["crash"][1]]
+        wealth = (1.0 + crash).cumprod()
+        rows[(label, "Crash return (%)")] = 100 * (wealth.iloc[-1] - 1.0)
+        rows[(label, "Max drawdown (%)")] = 100 * (wealth / wealth.cummax().clip(lower=1.0) - 1.0).min()
+        rebound = returns.loc[w["rebound"][0]:w["rebound"][1]]
+        rows[(label, "Rebound return (%)")] = 100 * ((1.0 + rebound).prod() - 1.0)
+    return pd.DataFrame(rows).T.rename_axis(["Event", "Metric"])
+
+
+def plot_event_paths(returns: pd.DataFrame, windows: dict, colors=None, labels=None, linestyles=None):
+    """One panel per event: wealth from 1 at the peak through the market's recovery,
+    with the crash shaded."""
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
+
+    colors, labels, linestyles = colors or COLORS, labels or LABELS, linestyles or {}
+    months = returns.index
+    # Points are wealth at month end, so the peak point is 1 at the end of the peak month.
+    month_end = lambda m: pd.PeriodIndex([str(d) for d in m], freq="M").to_timestamp(how="end")
+    fig, axes = plt.subplots(1, len(windows), figsize=(5.2 * len(windows), 4.2))
+    for ax, (label, w) in zip(np.atleast_1d(axes), windows.items()):
+        span = months[months.get_loc(w["peak"]):months.get_loc(w["recovery"]) + 1]
+        path = (1.0 + returns.loc[span[1:]]).cumprod()
+        path = pd.concat([pd.DataFrame(1.0, index=span[:1], columns=returns.columns), path])
+        when = month_end(span)
+        crash = month_end([w["peak"], w["trough"]])
+        ax.axvspan(crash[0], crash[1], color="0.9", zorder=0)
+        locator = mdates.AutoDateLocator()
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+        for k in returns.columns:
+            ax.plot(when, path[k], color=colors.get(k), linestyle=linestyles.get(k, "-"),
+                    label=labels.get(k, k))
+        ax.axhline(1.0, color="0.5", linewidth=0.8)
+        ax.set_title(f"{label}\npeak {w['peak']}, trough {w['trough']}, market recovery {w['recovery']}",
+                     fontsize=10)
+    np.atleast_1d(axes)[0].set_ylabel("wealth, 1 at the market peak")
+    handles, names = np.atleast_1d(axes)[0].get_legend_handles_labels()
+    fig.legend(handles, names, loc="lower center", ncol=len(names), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    return fig
